@@ -1,2 +1,16 @@
-# Military_service_coding
-During the service in Korean military, I started to learn codes
+#  Python Study Log (Military Service) 2026-1-
+
+현재 대한민국 육군 복무 중이며, 군대라는 제한된 환경에서 꾸준히 제가 만든 코드를 기록하고 있습니다.
+대학교 1, 2학년 시절에는 개발자가 ai에 의해 대체되는 것이라는 두려움에 방황하여 공부에 집중하지 못하고 시간을 보내기도 했습니다. 
+하지만 입대 동안 생각을 정리하여 ai가 대체 불가능한 사람이 되자는 목표를 확실히 세웠습니다
+매일 학습한 결과물을 이곳에 꾸준히 기록하며, 저의 실력 향상 과정을 증명하고자 합니다.
+
+
+**목표** 
+- 목표 직업: Technical Artist의 소양을 갖춘 게임 개발자
+- 단기적 목표: 2027년 복학 전까지 Python 및 기초 CS 완벽 습득
+- 현재 상황: 경희대학교 (컴퓨터 공학과, 군 휴학 중, 27년 3월 복학 예정)
+- 공부 방법: gemini를 통해 매일 숙제를 수행 중, Jump to Python 서적을 통해 놓치는 개념 크로스체크
+
+---
+*Last updated: 2026-02-05*
