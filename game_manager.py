@@ -3,13 +3,13 @@ import item
 import time
 import random
 import sys
-import data_manager as dm   #세이브 로드
+import data_manager as dm
 
 
 class GameManager:
   def __init__(self):
     self.hero = ch.Adventurer("모험가", 200, 40)
-    saved_data = dm.load_games()                  #만약 save된 파일이 있을 경우 로드
+    saved_data = dm.load_games()
     if saved_data:
       self.hero.name = saved_data["name"]
       self.hero.max_hp = saved_data["max_hp"]
@@ -29,7 +29,7 @@ class GameManager:
       print("4. 게임을 저장한다.")
       print("5. 게임을 끈다.")
       print("="*30)
-      menu_choice = int(input("메뉴를 선택하세요: "))
+      menu_choice = self.get_user_input()
 
       if menu_choice == 1:
         if self.hero.hp > 0:
@@ -50,6 +50,14 @@ class GameManager:
         print("잘못된 입력입니다. 1, 2, 3, 4, 5 중 하나를 입력하십시오\n")
         continue
 
+  def get_user_input(self):
+    while True:
+      try:
+        value = int(input("선택 >>"))
+        return value
+      except ValueError:
+        print("오류: 잘못된 입력입니다. 숫자를 입력하세요")
+
   def start_battle(self):
     print(f"던전에 입장했다..\n")
     self.turn = 1
@@ -60,17 +68,28 @@ class GameManager:
 
     while self.hero.hp > 0 and mob.hp > 0:
       print(f"{self.turn}턴 째")
-      action = int(input("무엇을 할까?(숫자키 입력): 1: 공격   2. 아이템 복용"))
+      print("무엇을 할까?(숫자키 입력): 1: 공격   2. 아이템 복용")
+      action = self.get_user_input()
 
       if action == 1:
         self.hero.attack(mob)
       elif action == 2:
         self.hero.use_potion()
-      else:
-        print("잘못된 입력입니다. 숫자 1, 2 중 하나를 입력하십시오\n")
-        continue
 
+      if mob.hp <= 0:
+        print(f"\n {mob.name}은(는) 쓰러졌다!")
+        #만약 쓰러뜨린 적이 몬스터라면?
+        if isinstance(mob, ch.BossMonster):
+          self.ending(self.hero)
+          break
+        break
+
+      print(f"\n--- {mob.name}의 턴 ---")
       mob.attack(self.hero)
+
+      if self.hero.hp <= 0:
+        print(f"\n💀 {self.hero.name}은(는) 쓰러졌다...")
+        break
 
       time.sleep(1)
       self.turn += 1
@@ -80,15 +99,17 @@ class GameManager:
   def check_result(self):
     print("="* 30)
     if self.hero.hp > 0:
-      self.hero.gold += 300       #일단 매직넘버로 남김
-      print(f"{self.hero.name}의 승리! 300골드를 획득했다!")
+      self.hero.gold += 300       #매직넘버
+      print("300골드를 획득했다!")
     else:
-      print(f"{self.hero.name}는 패배했다...")
+      print("던전에서 도망쳤다...")
 
   def shop(self):
     print('상점에 방문했다!')
     print(f'상인: "지금은 포션만 취급하고 있습니다..."')
-    shop_list = int(input(f"무엇을 살까? 1.포션: 300  (0은 취소), 현재 골드 {self.hero.gold}"))   #매직넘버
+    print(f"무엇을 살까? 1.포션: 300  (0은 취소), 현재 골드 {self.hero.gold}") #매직넘버
+    shop_list = self.get_user_input()
+
     if shop_list == 0:
       print('상인: "다음에 또 오시지요..."')
 
@@ -107,3 +128,15 @@ class GameManager:
       print('여관 주인:"다음에 또 오세요!"')
     else:
       print("돈이 부족해서 여관에 쉴 수 없다!")
+
+  def ending(self, main_character):         #보스를 잡으면 엔딩
+    print("\n"+"="*30)
+    print("그렇게 마을은 평화를 얻었다...")
+    time.sleep(0.5)
+    print(f"{main_character.name}은 마을의 영웅이 되어 오랜 시간 마을을 지켰다")
+    time.sleep(0.5)
+    print("END")
+    print("dev by 펄짓")
+    print("Thanks for play!")
+    print("="*30)
+    sys.exit()
