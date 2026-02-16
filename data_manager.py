@@ -1,7 +1,7 @@
 import json
 import os
-import second_new_game_manager as gm
-import newcharacter as ch
+import game_manager as gm
+import character as ch
 
 SAVE_FILE = "sava_data.json"
 
