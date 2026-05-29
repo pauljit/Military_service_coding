@@ -1,0 +1,23 @@
+from pipeline import *
+import matplotlib.pyplot as plt
+
+my_model = Model('coffee_cup_obj.obj')
+diffuse = Texture('coffee_cup_texture.png')
+normal = Texture('coffee_cup_normal.png')
+specular = Texture('coffee_cup_metallic.png')
+
+# 렌더러 엔진 가동!
+renderer = Pipeline(1920, 1080) # 해상도 자유자재로 변경 가능
+
+renderer.clear() # 화면 지우기
+
+# 카메라 세팅 변경 (카메라를 뒤로 띄우고 살짝 회전)
+renderer.camera.eye = Vector3(0, 0.3, 1.5) # 적절한 거리로 배치
+renderer.camera.rotate(180, 0)          # yaw, pitch 회전 적용
+
+# 메쉬 렌더링 지시
+renderer.render_mesh(my_model, diffuse, normal, specular)
+
+# 결과물 출력
+result_image = renderer.show()
+display(result_image)
