@@ -1,0 +1,69 @@
+# %%writefile main.py
+
+
+from pipeline import *
+import matplotlib.pyplot as plt
+
+coffee_cup = Model('coffee_cup_obj.obj')
+transparent_cup = Model ('coffee_cup_obj.obj')
+
+#추가: 모델들을 노드에 추가 및 월드 위치 설정(26.06.06)
+all_node = Node()
+coffee_cup_node = Node(coffee_cup)
+transparent_cup_node = Node(transparent_cup)
+all_node.add_child(coffee_cup_node)
+all_node.add_child(transparent_cup_node)
+
+#노드 변형
+coffee_cup_node.local_position = Vector3(0,0,-3)
+transparent_cup_node.local_position = Vector3(0,0,0)
+rotation = Quaternion().axis_angle(Vector3(0,1,0), 180)
+coffee_cup_node.local_rotation = rotation
+
+#변형 적용
+all_node.update_transform()
+
+origin_point = Vector3(0,0,0)
+print(f"커피컵 월드 좌표: {coffee_cup_node.world_matrix.mul_vector(origin_point)}")
+print(f"투명컵 월드 좌표: {transparent_cup_node.world_matrix.mul_vector(origin_point)}")
+
+#추가: 스카이박스 모델 및 텍스쳐 (26.06.07)
+skybox = Model('skybox_minecraft.obj')
+skybox_diffuse = Texture('skybox_minecraft_texture.png')
+
+#모델 텍스쳐 설정
+diffuse = Texture('coffee_cup_texture.png')
+normal = Texture('coffee_cup_normal.png')
+specular = Texture('coffee_cup_metallic.png')
+
+target_position = coffee_cup_node.get_world_position()
+
+
+# 렌더러 엔진 가동
+renderer = Pipeline(1920, 1080) # 해상도 설정
+renderer.clear() #초기화  화면 지우기
+
+#추가: 투명/불투명 물체 리스트 구분 (26.06.06)
+opaque_objects = [coffee_cup_node]
+transparent_objects = [transparent_cup_node]
+
+# 카메라 세팅 변경 (카메라를 뒤로 띄우고 살짝 회전)
+renderer.camera.eye = Vector3(2, 0.5, 3) # 적절한 거리로 배치
+print(renderer.camera)
+
+#스카이박스 렌더링
+renderer.render_skybox(skybox, skybox_diffuse)
+
+#메쉬 렌더링 지시
+#추가: 투명/불투명마다 다른 렌더링 과정
+for obj in opaque_objects:
+  renderer.render_mesh(obj.model, diffuse, normal, specular, world_matrix = obj.world_matrix)
+
+transparent_objects.sort(key=lambda n: n.get_world_position().minus(renderer.camera.eye).magnitude(), reverse=True)
+
+for obj in transparent_objects:
+  renderer.render_mesh(obj.model, diffuse, normal, specular, world_matrix = obj.world_matrix, object_alpha = 0.1)
+
+# 결과물 출력
+result_image = renderer.show()
+display(result_image)
