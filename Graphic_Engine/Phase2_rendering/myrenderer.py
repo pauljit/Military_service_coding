@@ -1,0 +1,381 @@
+
+from scene_node import *
+from PIL import Image       #이미지를 메모리로 불러오는 라이브러리
+
+
+#버텍스 클래스
+class Vertex:
+  def __init__(self, position, uv, normal = Vector3(0,0,0)):
+    self.position = position          #위치 벡터(3d 벡터)
+    self.uv = uv                      #uv 좌표 (2d 텍스쳐의 가로, 세로 비율에 해당하는 위치(2d 벡터))
+    self.normal = normal
+
+#컬러 클래스
+class Color:
+  #컬러가 가진 rgb 값(기본 흰색)
+  def __init__(self, r=255, g=255, b=255):
+    self.r = r
+    self.g = g
+    self.b = b
+    self.clamp()
+
+  #각 rgb 값은 0~255로 되어있음(고정하는 함수)
+  def clamp(self):
+    self.r = max(0, min(255, int(self.r)))
+    self.g = max(0, min(255, int(self.g)))
+    self.b = max(0, min(255, int(self.b)))
+
+  #스칼라에 따라 곱함(ambient, diffuse 적용 시 사용)
+  def multiply(self, scalar):
+    return Color(self.r * scalar, self.g * scalar, self.b * scalar)
+
+  #다른 색상과 rgb값을 더함 (specular 빛 누적 시 사용)
+  def add(self, other):
+    return Color(self.r + other.r, self.g + other.g, self.b + other.b)
+
+  def to_tuple(self):
+    x = self.r
+    y = self.g
+    z = self.b
+    return (x, y, z)
+
+  #출력시 rgb값 내뱉음
+  def __repr__(self):
+    return f"R: {self.r}, G: {self.g}, B: {self.b})"
+
+
+#텍스쳐 클래스
+class Texture:
+  #불러온 이미지 파일의 픽셀 데이터 접근 준비
+  def __init__(self,filepath):
+    self.image = Image.open(filepath).convert('RGB')   #이미지를 열고 rgb모드로 전환
+    self.width = self.image.width
+    self.height = self.image.height
+    self.pixels = self.image.load()                    #픽셀 배열에 빠르게 접근하기 위한 객체
+
+  #uv 값을 받으면 해당 위치에 rgb 값을 반환
+  def get_color(self, u, v):
+    #uv 값이 0.0~1.0을 넘지 않음
+    u = u % 1.0
+    v = v % 1.0
+    # 소수점 단위의 픽셀 값 계산 (배열 형태이므로 -1)
+    real_x = u * (self.width - 1)
+    real_y = (1-v) * (self.height - 1)
+    # 해당 픽셀의 주변 픽셀 4개 찾기 (예 (0.1,1.4) 라면 (0,1)(좌하단), (1,1)(우하단), (1,2)(좌상단), (0,2)(우상단))
+    x0 = int(real_x)
+    y0 = int(real_y)
+    x1 = min(x0 + 1, self.width -1)
+    y1 = min(y0 + 1, self.height -1)
+    # 소수점 이하 비율 (거리에 따른 가중치)
+    dx = real_x - x0
+    dy = real_y - y0
+    # 4개 픽셀의 색상 (컴퓨터 좌표는 y축인 반대이므로 y0이 상단이고 y1이 하단임)
+    c00 = self.pixels[x0, y0]  #좌상단
+    c10 = self.pixels[x1, y0]  #우상단
+    c01 = self.pixels[x0, y1]  #좌하단
+    c11 = self.pixels[x1, y1]  #우하단
+
+    r = (c00[0] * (1-dx) * (1-dy) +
+         c10[0] * (dx) * (1-dy) +
+         c01[0] * (1-dx) * (dy) +
+         c11[0] * (dx) * (dy))
+    g = (c00[1] * (1-dx) * (1-dy) +
+         c10[1] * (dx) * (1-dy) +
+         c01[1] * (1-dx) * (dy) +
+         c11[1] * (dx) * (dy))
+    b = (c00[2] * (1-dx) * (1-dy) +
+         c10[2] * (dx) * (1-dy) +
+         c01[2] * (1-dx) * (dy) +
+         c11[2] * (dx) * (dy))
+    return Color(int(r), int(g), int(b))
+
+#모델 클래스
+class Model:
+  def __init__(self, filepath):
+    self.triangles = [] #완성된 버텍스 3묶음을 저장하는 리스트
+    self.load_obj(filepath)
+
+  #텍스트 파일에서 읽은 원본 데이터 저장
+  #추가: 기본 스케일에 따라 조정 
+  def load_obj(self, filepath):
+    # 임시 저장 리스트
+    temp_v = []  # 버텍스 좌표 리스트
+    temp_vt = [] # uv 좌표 리스트
+    temp_vn = [] # 법선벡터 리스트
+    with open(filepath, 'r') as file:
+      for line in file:
+        #공백을 기준으로 문자열 쪼개기
+        parts = line.strip().split()
+        if not parts:
+          continue
+        prefix = parts[0]  # 값의 형태가
+        # 위치일 경우
+        # 추가 (스케일에 따라 변경)
+        if prefix == 'v':
+          temp_v.append(Vector3(
+              float(parts[1]),
+              float(parts[2]),
+              float(parts[3])))
+        # uv좌표일 경우
+        elif prefix == 'vt':
+          temp_vt.append(Vector2(float(parts[1]), float(parts[2])))
+        # 법선벡터일 경우
+        elif prefix == 'vn':
+          temp_vn.append(Vector3(float(parts[1]), float(parts[2]), float(parts[3])))
+        # 면일 경우
+        elif prefix == 'f':
+          #obj에서 f는 보통 v1/vt1/vn1 v2/vt2/vn2 v3/vt3/vn3 형태이므로 /을 기준으로 분리
+          face_vertices = []
+          # f의 모든 꼭지점 정보를 읽어옴
+          for i in range(1, len(parts)):
+            v_data = parts[i].split('/')
+            #obj는 1이 시작이므로 -1로 맞춰주기
+            pos_idx = int(v_data[0]) - 1
+            uv_idx = int(v_data[1]) - 1 if len(v_data) > 1 and v_data[1] != '' else -1
+            normal_idx = int(v_data[2]) - 1 if len(v_data) > 2 else -1
+            #임시 리스트에서 데이터를 가져와 vertex class화 시키기
+            position = temp_v[pos_idx]
+            uv = temp_vt[uv_idx] if uv_idx != -1 else Vector2()
+            normal = temp_vn[normal_idx] if normal_idx != -1 else Vector3()
+            face_vertices.append(Vertex(position, uv, normal))
+          #조립된 버텍스를 삼각형 리스트에 저장 (만약 다각형일 경우 자동으로 삼각형으로 쪼개짐)
+          for i in range(1, len(face_vertices) - 1):
+            self.triangles.append((face_vertices[0], face_vertices[i], face_vertices[i+1]))
+    print(f"모델 로드 완료. 총 {len(self.triangles)}개의 면을 만들었습니다")
+
+#카메라 클래스
+class Camera:
+    def __init__(self, eye, yaw=0.0, pitch=0.0):
+        self.eye = eye       # 카메라의 월드 위치
+        self.yaw = yaw       # 좌우 회전각 (Degree)
+        self.pitch = pitch   # 상하 회전각 (Degree)
+        self.up = Vector3(0, 1, 0) # 세상의 기본 위쪽 방향 (Y축)
+        self.update_vectors()
+
+    # 각도가 변할 때마다 카메라의 방향 벡터를 재계산하는 핵심 수학 함수
+    def update_vectors(self):
+        # 1. 각도를 라디안(Radian)으로 변환
+        yaw_rad = math.radians(self.yaw)
+        pitch_rad = math.radians(self.pitch)
+
+        # 2. 구면 좌표계(Spherical Coordinates)를 이용한 Forward 벡터 계산
+        # 피타고라스와 삼각함수의 조합으로 3D 공간의 방향을 짚어냅니다.
+        fx = math.cos(pitch_rad) * math.sin(yaw_rad)
+        fy = math.sin(pitch_rad)
+        fz = math.cos(pitch_rad) * math.cos(yaw_rad)
+        self.forward = Vector3(fx, fy, fz).normalize()
+
+        # 3. 외적(Cross Product)을 통한 나머지 나침반 계산
+        self.right = self.up.cross(self.forward).normalize()
+        self.true_up = self.forward.cross(self.right).normalize()
+
+        # 4. 바라보는 타겟 위치 갱신: (내 위치 + 정면으로 1보 내디딘 위치)
+        self.target = self.eye.add(self.forward)
+
+    # 마우스 회전 (Pitch, Yaw 변경)
+    def rotate(self, delta_yaw, delta_pitch):
+        self.yaw += delta_yaw
+        self.pitch += delta_pitch
+
+        # 짐벌락(Gimbal Lock)과 목 꺾임 방지를 위해 Pitch 각도 제한
+        if self.pitch > 89.0:
+            self.pitch = 89.0
+        if self.pitch < -89.0:
+            self.pitch = -89.0
+
+        self.update_vectors()
+
+    # 키보드 WASD 이동 (Forward, Right 벡터 활용)
+    def move(self, forward_speed, right_speed):
+        # 1인칭 슈팅(FPS) 게임처럼 시선이 하늘을 향해도 공중부양하지 않고 땅을 걷게 하려면 y값을 0으로 둡니다.
+        # (자유 비행을 원하시면 self.forward.y * forward_speed 를 쓰시면 됩니다)
+        move_f = Vector3(self.forward.x * forward_speed, 0, self.forward.z * forward_speed)
+        move_r = Vector3(self.right.x * right_speed, 0, self.right.z * right_speed)
+
+        # 내 위치(eye) 업데이트
+        self.eye = self.eye.add(move_f).add(move_r)
+        self.update_vectors()
+
+    # 렌더링 루프에 넘겨줄 View 행렬 조립기
+    def get_view_matrix(self):
+        mat = Matrix4()
+        mat.view_matrix(self.eye, self.target, self.true_up)
+        return mat
+
+    def __repr__(self):
+      return f"카메라 위치: {self.eye}, 카메라 타겟: {self.target}"
+
+
+#기타 함수들
+
+# 0. 백페이스 컬링(시선 뒤에 있는 버텍스들은 연산 전에 지우기) (표면의 법선 벡터와 시선 벡터의 내적 후 0보다 작으면 백페이스임)
+def is_backface(A, B, C, camera_pos):
+  normal = surface_vector(A, B, C)
+  view_dir = camera_pos.minus(A).normalize()
+  if normal.dot(view_dir) <= 0:
+    return True             #내적값이 0이거나 그보다 작으면 시선 뒤에 있음
+  else:
+    return False            #시선 앞에 있음
+
+
+
+# 1. ndc_pos = 정규화된 기기 좌표 (각 x, y 축의 화면 끝에서 반대 끝까지를 -1에서 1로 표현(이 수를 벗어나면 화면에서 벗어난 것으로 간주하고 안 보임)
+def ndc_pos(Project, View, Model, vector3):
+  #PVM 순서로 융합 후 위치 벡터를 적용하면 ndc 좌표가 나옴
+  return Project.mul_matrix(View).mul_matrix(Model).mul_vector(vector3)
+
+# 2. ndc 값을 받아 실제 모니터 상으로 어느 픽셀에 찍힐지 적용
+def pixel_pos(ndc_pos, screen_width = 1920, screen_height = 1080):
+  result = Vector3()
+  # -1.0 ~ 1.0 사이의 값을 픽셀 비율로 변환
+  result.x = int((ndc_pos.x + 1.0) * 0.5 * screen_width)
+  # Y축은 그래픽스 수학과 모니터 픽셀(위에서 아래로 내려감) 방향이 반대라서 뒤집어줌
+  result.y = int((1.0 - ndc_pos.y) * 0.5 * screen_height)
+  result.z = ndc_pos.z
+  return result
+
+# 3. 삼각형 외적 (래스터화)(+-로 모니터로 구현된 세개의 점(폴리곤) 안에 해당 픽셀이 포함되는지 확인)(외적한 벡터의 z값이 방향)
+def is_in_triangle(pixel, A, B, C):
+  cross1 = (B.minus(A)).cross(pixel.minus(A)).z    #AB 벡터와 AP(특정 픽셀)벡터의 외적의 z(방향)값
+  cross2 = (C.minus(B)).cross(pixel.minus(B)).z
+  cross3 = (A.minus(C)).cross(pixel.minus(C)).z
+  if cross1 >= 0 and cross2 >= 0 and cross3 >= 0:
+    return True
+  else:
+    return False
+
+# 4. 래스터 폴리곤 색칠 (외적의 z값이 면적의 넓이 = 모든 외적을 합치면 그것이 삼각 점의 면적)
+def get_pixel_color(pixel, A, B, C, colorA, colorB, colorC):
+  cross1 = (B.minus(A)).cross(pixel.minus(A)).z   #C의 면적
+  cross2 = (C.minus(B)).cross(pixel.minus(B)).z   #A의 면적
+  cross3 = (A.minus(C)).cross(pixel.minus(C)).z   #B의 면적
+  #만약 P가 밖이면 배경색임
+  if cross1 < 0 or cross2 < 0 or cross3 < 0:
+    return "배경색"
+  #전체 면적 = 세 외적의 값
+  total_area = cross1 + cross2 + cross3
+  #각 외적의 비중
+  weight_A = cross1 / total_area
+  weight_B = cross2 / total_area
+  weight_C = cross3 / total_area
+  #각 영향력에 따라 최종 rgb 비율 색상 값 결정
+  color_R = (colorA[0]*weight_A) + (colorB[0]*weight_B) + (colorC[0]*weight_C)
+  color_G = (colorA[1]*weight_A) + (colorB[1]*weight_B) + (colorC[1]*weight_C)
+  color_B = (colorA[2]*weight_A) + (colorB[2]*weight_B) + (colorC[2]*weight_C)
+  return f"색상: R: {color_R:.1f}, G: {color_G:.1f}, B: {color_B:.1f}"
+
+#5. 삼각형의 수직벡터
+def surface_vector(A, B, C):
+  surface_vector = B.minus(A).cross(C.minus(A)).normalize()
+  return surface_vector
+
+# 6. 램버트 조명 (삼각형(표면)이 빛을 받아 사방으로 퍼지는 정도를 계산)
+def lambert_light(A, B, C, light):
+  #표면의 법선벡터
+  surface = surface_vector(A, B, C)
+  surface_normal = surface.normalize()
+  # 빛의 법선벡터 (빛의 방향)
+  light_normal = light.normalize()
+  # 두 법선 벡터가 얼마나 닮았는지 내적
+  brightness = surface_normal.dot(light_normal)
+  if brightness <= 0:                                    # 내적값이 -일 경우 0임
+    brightness = 0
+  return brightness
+
+# 7. 퐁 반사 모델(카메라에서 보이는 삼각형(표면)의 반사광)
+def phong_reflection(A, B, C, light, view, shininess = 32):
+  # 빛, 표면의 법선벡터
+  surface = surface_vector(A, B, C)
+  surface_normal = surface.normalize()
+  light_normal = light.normalize()
+  # 카메라의 법선벡터
+  view_normal = view.normalize()
+  # 반사광의 법선벡터 (R = 2 * (N dot L) * N - L).normalize()
+  if surface_normal.dot(light_normal) < 0:                      # 내적값이 마이너스일 경우 표면이 빛을 안 받았다는 뜻이므로 공식을 쓰지 않고 바로 0
+    return 0
+  reflection = surface_normal.multiply(2 * surface_normal.dot(light_normal))
+  reflection = reflection.minus(light_normal)
+  reflection_normal = reflection.normalize()
+  # 카메라의 법선벡터와 반사광의 법선벡터의 유사도 계산(내적)(정반사광(specular))
+  specular_factor = reflection_normal.dot(view_normal)
+  if specular_factor <= 0:
+    specular_factor = 0
+  # shininess는 재질의 매끄러움의 정도(값이 클수록 반사광이 뾰족해짐)
+  specular_highlight = specular_factor ** shininess
+  return specular_highlight
+
+# 8. 퐁 조명 모델(최종적으로 모니터에 보이는 색)(ambient = 기본 환경광, diffuse = 램버트 조명 값, specular = 반사광 하이라이트)
+def phong_lighting(color, diffuse, specular, ambient= 0.1):
+  #반사광의 색깔(하얀색)
+  light_color = Color(255,255,255)
+  #최종 rgb값 = 표면의 rgb * (ambient + diffuse) + specular
+  final_color = Color()
+  final_color =  color.multiply(ambient + diffuse).add(light_color.multiply(specular))
+  return final_color
+
+# 9. 툰쉐이딩 전환(애니메이션 풍 렌더링)(어중간하게 명암과 하이라이트를 구분하지 않고 2개로 확실히 함)
+def toon_filter(diffuse, specular):
+  #diffuse를 투톤으로만 나눔(명암 구분)
+  if diffuse > 0.5:
+    toon_diffuse = 1.0        # 밝은 면
+  else:
+    toon_diffuse = 0.5        # 그림자 면
+  #specular를 끊어내어 하이라이트를 확실하게 구분(엔젤링)
+  if specular > 0.8:
+    toon_specular = 1.0
+  else:
+    toon_specular = 0
+  return toon_diffuse, toon_specular
+
+# 10. uv 보간(세개의 위치들 사이에 uv 값을 채워넣기)(무게중심에 따라 달라지는 점에서 책 채워넣기와 같음)
+def uv_interpolate(uv_a, uv_b, uv_c, alpha, beta, gamma):
+  #u 좌표 보간(가로) (여기서 알파, 베타, 감마는 무게 중심에 따른 면적 비율)
+  uv_x = (uv_a.x * alpha) + (uv_b.x * beta) + (uv_c.x * gamma)
+  #v 좌표 보간(세로)
+  uv_y = (uv_a.y * alpha) + (uv_b.y * beta) + (uv_c.y * gamma)
+  return Vector2(uv_x, uv_y)
+
+# 11. 텍스쳐와 조명을 더해 픽셀의 최종 색상 구하기
+def get_final_color(u, v, A, B, C, view_dir, light_dir, texture = Color()):
+  #표면의 기초 색상
+  base_color = texture.get_color(u,v)
+  #표면이 받는 빛과 반사광
+  diffuse = lambert_light(A,B,C, light_dir)
+  specular = phong_reflection(A, B, C, light_dir, view_dir)
+  #툰쉐이딩
+  toon_diffuse, toon_specular = toon_filter(diffuse, specular)
+  #통합
+  final_color = phong_lighting(base_color, toon_diffuse, toon_specular)
+  return final_color
+
+# 12. z 버퍼, 같은 x,y값에서 깊이(z값)가 작은 것만 화면으로 보여줌
+#렌더링할때마다 화면 해상도에 맞춘 z버퍼 초기화 (화면 해상도: 1920*1080)
+WIDTH = 1920
+HEIGHT = 1080
+
+#z 버퍼(초기에 무한값을 저장하는 2차원 리스트)(특정 x,y값에 가장 가까운 z값을 입력받으면 그 값만을 저장함)
+z_buffer = [[float('inf') for _ in range(WIDTH)]for _ in range(HEIGHT)]
+
+#프레임 버퍼(초기에 검은색을 저장하는 2차원 리스트)
+frame_buffer = [[(0,0,0) for _ in range(WIDTH)]for _ in range(HEIGHT)]
+
+def draw_depth(x, y, current_z, final_color):
+  #화면 밖을 나간 좌표는 무시(x, y)
+  if x < 0 or x >= WIDTH or y < 0 or y >= HEIGHT:
+    return
+  # 만약 입력 받은 z 값이 해당 위치에 저장된 z버퍼 값보다 낮을 경우 해당 z가 기존 z버퍼를 대체
+  if current_z < z_buffer[y][x]:
+    frame_buffer[y][x] = final_color
+    z_buffer[y][x] = current_z
+
+# 현 픽셀 위치에 따른 가중치 비율 구하기
+def get_bycentric(A,B,C,P):
+  # 삼각형 면적(외적 활용)(0일 경우 음수값 반환(픽셀 안 칠함))
+  area = (B.x - A.x) * (C.y - A.y) - (B.y - A.y) * (C.x - A.x)
+  if area == 0:
+    return -1, -1, -1
+  #P점을 기준으로 삼각형의 비율 구하기
+  alpha = ((B.x - P.x) * (C.y - P.y) - (B.y - P.y) * (C.x - P.x)) / area
+  beta = ((C.x - P.x) * (A.y - P.y) - (C.y - P.y) * (A.x - P.x)) / area
+  gamma = 1 - alpha - beta
+  return alpha, beta, gamma
