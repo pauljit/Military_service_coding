@@ -1,9 +1,8 @@
-
 from mymath import *
 
 #노드 (부모 - 자식으로 종속된 클래스)(26.06.04)
 class Node:
-  def __init__(self, model= None, object_alpha = 1.0):
+  def __init__(self, model= None, object_alpha = 1.0, light = None):
     self.local_position = Vector3()
     self.local_rotation = Quaternion()
     self.local_scale = Vector3(1,1,1)
@@ -14,6 +13,8 @@ class Node:
     #추가: 불러온 모델을 월드값에 전시(26.06.06)
     self.model = model
     self.object_alpha = object_alpha
+    #추가: 조명도 노드로 추가할 수 있도록 light 속성 추가(26.06.20)
+    self.light = light
 
 
   #종속되는 자식 계층 생성
