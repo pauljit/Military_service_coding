@@ -1,3 +1,4 @@
+%%writefile myrenderer.py
 
 from scene_node import *
 from PIL import Image       #이미지를 메모리로 불러오는 라이브러리
@@ -96,7 +97,7 @@ class Model:
     self.load_obj(filepath)
 
   #텍스트 파일에서 읽은 원본 데이터 저장
-  #추가: 기본 스케일에 따라 조정 
+  #추가: 기본 스케일에 따라 조정
   def load_obj(self, filepath):
     # 임시 저장 리스트
     temp_v = []  # 버텍스 좌표 리스트
@@ -172,6 +173,14 @@ class Camera:
         # 4. 바라보는 타겟 위치 갱신: (내 위치 + 정면으로 1보 내디딘 위치)
         self.target = self.eye.add(self.forward)
 
+    # 카메라가 현재 바라보는 정면 벡터 반환
+    def get_forward_vector(eye, target):
+        return target.minus(eye).normalize()
+
+    # 카메라의 우측 벡터 반환
+    def get_right_vector(forward, world_up=Vector3(0,1,0)):
+        return world_up.cross(forward).normalize()
+
     # 마우스 회전 (Pitch, Yaw 변경)
     def rotate(self, delta_yaw, delta_pitch):
         self.yaw += delta_yaw
@@ -205,6 +214,20 @@ class Camera:
     def __repr__(self):
       return f"카메라 위치: {self.eye}, 카메라 타겟: {self.target}"
 
+
+
+class Pointlight:
+  def __init__(self, position, color, intensity = 50):
+    self.position = position
+    self.color = color
+    self.intensity = intensity
+
+
+class Directlight:
+  def __init__(self, direction, color, intensity = 1):
+    self.direction = direction
+    self.color = color
+    self.intensity = intensity
 
 #기타 함수들
 
@@ -379,3 +402,17 @@ def get_bycentric(A,B,C,P):
   beta = ((C.x - P.x) * (A.y - P.y) - (C.y - P.y) * (A.x - P.x)) / area
   gamma = 1 - alpha - beta
   return alpha, beta, gamma
+
+#추가: 꼭지점 없이 조명 (26/06/24)
+
+def calc_lambert_factor(world_normal, light_dir):
+    return max(0.0, world_normal.dot(light_dir))
+
+# 퐁 정반사 (Specular) 계산
+def calc_phong_factor(world_normal, light_dir, view_dir, shininess=32):
+    dot_product = world_normal.dot(light_dir)
+    if dot_product <= 0:
+        return 0.0
+    # 반사 벡터: R = 2 * (N * L) * N - L
+    reflection_dir = world_normal.multiply(2 * dot_product).minus(light_dir).normalize()
+    return max(0.0, view_dir.dot(reflection_dir)) ** shininess
