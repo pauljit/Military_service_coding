@@ -1,4 +1,3 @@
-
 from myrenderer import *
 import numpy as np
 from PIL import Image
@@ -18,49 +17,85 @@ class Pipeline:
     self.camera = Camera(Vector3(0, 0, 0), 0, 0)
 
     # 3. 조명 기본 세팅
-    self.light_pos = Vector3(1, 1, 3)
+    self.light_pos = Vector3(1, 2, 3)
     self.light_intensity = 50
     self.ambient_light = 0.35
+    self.lights = []
 
   #픽셀 하나하나의 색상을 결정
-  def fragment_shader(self, u, v, face_normal, tangent_vector, attenuation, light_dir, view_dir, diffuse_map, normal_map, specular_map):
-    #텍스쳐에서 픽셀 색상 추출
+  def fragment_shader(self, u, v, face_normal, tangent_vector, interp_pos, view_dir, diffuse_map, normal_map, specular_map):
+    # 1. 텍스처에서 기본 색상 추출
     base_color = diffuse_map.get_color(u, v)
-    nm_color = normal_map.get_color(u,v)
-    sp_color = specular_map.get_color(u,v)
+    nm_color = normal_map.get_color(u, v)
+    sp_color = specular_map.get_color(u, v)
 
-    #노멀 맵 TBN 디코딩 및 빛의 교란
+    # 2. 노멀 맵 TBN 디코딩 및 월드 노멀 벡터 도출
     nx = (nm_color.r / 127.5) - 1
     ny = (nm_color.g / 127.5) - 1
     nz = (nm_color.b / 127.5) - 1
+    local_normal = Vector3(nx, ny, nz).normalize()
 
-    tangent_normal = Vector3(nx, ny, nz).normalize()
-    bitangent_normal = face_normal.cross(tangent_normal).normalize()
+    normal = face_normal.normalize()
+    tangent = tangent_vector.minus(normal.multiply(tangent_vector.dot(normal))).normalize()
+    bitangent = normal.cross(tangent).normalize()
 
-    final_nx = tangent_normal.x * tangent_vector.x + tangent_normal.y * bitangent_normal.x + tangent_normal.z * face_normal.x
-    final_ny = tangent_normal.x * tangent_vector.y + tangent_normal.y * bitangent_normal.y + tangent_normal.z * face_normal.y
-    final_nz = tangent_normal.x * tangent_vector.z + tangent_normal.y * bitangent_normal.z + tangent_normal.z * face_normal.z
-    perturbed_normal = Vector3(final_nx, final_ny, final_nz).normalize()
+    world_normal = Vector3(
+        tangent.x * local_normal.x + bitangent.x * local_normal.y + normal.x * local_normal.z,
+        tangent.y * local_normal.x + bitangent.y * local_normal.y + normal.y * local_normal.z,
+        tangent.z * local_normal.x + bitangent.z * local_normal.y + normal.z * local_normal.z
+    ).normalize()
 
-    #조명(diffuse & ambient) 계산
-    dot_product = max(0, perturbed_normal.dot(light_dir))
-    direct_diffuse = dot_product * attenuation * self.light_intensity
-    final_diffuse = self.ambient_light + direct_diffuse
+    # 3. 조명 누적 변수 초기화
+    total_diffuse_r, total_diffuse_g, total_diffuse_b = 0.0, 0.0, 0.0
+    total_specular = 0.0
 
-    #스펙큘러 반사율 적용
-    if perturbed_normal.dot(light_dir) < 0:
-      raw_specular = 0
-    else:
-      reflection = perturbed_normal.multiply(2 * perturbed_normal.dot(light_dir)).minus(light_dir).normalize()
-      specular_factor = max(0, reflection.dot(view_dir))
-      raw_specular = specular_factor ** 32
+    # 4. 씬에 있는 모든 조명을 순회하며 빛 누적 (모듈화된 함수 사용)
+    for light in self.lights:
+        light_dir = None
+        attenuation = 1.0
 
-    specular_intensity = sp_color.r / 255
-    final_specular = specular_intensity * raw_specular
+        if isinstance(light, Pointlight):
+            light_vector = light.position.minus(interp_pos)
+            light_distance = light_vector.magnitude()
+            attenuation = 1.0 / (1.0 + 0.1 * light_distance + 0.05 * (light_distance ** 2))
+            light_dir = light_vector.normalize()
 
-    #최종 색 결정 (색 클래스가 아닌 저장)
-    current_color = phong_lighting(base_color, final_diffuse, final_specular)
-    return current_color.to_tuple()
+        elif isinstance(light, Directlight):
+            light_dir = light.direction.multiply(-1).normalize()
+            attenuation = 1.0
+
+        if light_dir is None:
+            continue
+
+        # 🚨 분리한 헬퍼 함수를 사용하여 코드 가독성 극대화!
+        diff_factor = calc_lambert_factor(world_normal, light_dir)
+        spec_factor = calc_phong_factor(world_normal, light_dir, view_dir)
+
+        # 빛의 강도와 색상 적용하여 누적
+        total_diffuse_r += diff_factor * attenuation * light.intensity * (light.color.r / 255.0)
+        total_diffuse_g += diff_factor * attenuation * light.intensity * (light.color.g / 255.0)
+        total_diffuse_b += diff_factor * attenuation * light.intensity * (light.color.b / 255.0)
+        total_specular += spec_factor * attenuation * light.intensity
+
+    # 5. 최종 픽셀 색상 합성 (Ambient + Diffuse + Specular)
+    ambient_r = base_color.r * self.ambient_light
+    ambient_g = base_color.g * self.ambient_light
+    ambient_b = base_color.b * self.ambient_light
+
+    final_r = ambient_r + (base_color.r * total_diffuse_r)
+    final_g = ambient_g + (base_color.g * total_diffuse_g)
+    final_b = ambient_b + (base_color.b * total_diffuse_b)
+
+    spec_map_intensity = sp_color.r / 255.0
+    final_r += (255.0 * total_specular * spec_map_intensity)
+    final_g += (255.0 * total_specular * spec_map_intensity)
+    final_b += (255.0 * total_specular * spec_map_intensity)
+
+    final_r = max(0, min(255, int(final_r)))
+    final_g = max(0, min(255, int(final_g)))
+    final_b = max(0, min(255, int(final_b)))
+
+    return (final_r, final_g, final_b)
 
   def clear(self):
     #매 프레임 렌더링마다 캔버스와 z버퍼 클리어
@@ -87,14 +122,18 @@ class Pipeline:
     for triangle in tqdm(model.triangles, desc="메쉬", unit="tri"):
       vA, vB, vC = triangle
 
+      view_A = matrix_VM.mul_vector(vA.position)
+      view_B = matrix_VM.mul_vector(vB.position)
+      view_C = matrix_VM.mul_vector(vC.position)
+
       # ===== [백페이스 컬링] =====
       # 두 변을 외적한 법선벡터
-      line1 = vB.position.minus(vA.position)
-      line2 = vC.position.minus(vA.position)
+      line1 = view_B.minus(view_A)
+      line2 = view_C.minus(view_A)
       face_normal = line1.cross(line2).normalize()
 
       # 카메라에서 삼각형을 향하는 시선 벡터
-      camera_ray = vA.position.minus(self.camera.eye).normalize()
+      camera_ray = view_A.normalize()
 
       # 시선 벡터와 면의 법선의 내적이 0이면 뒷면 = 계산 필요 x
       if face_normal.dot(camera_ray) >= 0:
@@ -121,12 +160,11 @@ class Pipeline:
       tanx = inv_det * (deltaV2 * edge1.x - deltaV1 * edge2.x)
       tany = inv_det * (deltaV2 * edge1.y - deltaV1 * edge2.y)
       tanz = inv_det * (deltaV2 * edge1.z - deltaV1 * edge2.z)
-      tangent_vector = Vector3(tanx,tany,tanz).normalize()
-
-      #각 꼭지점을 뷰 공간에 보냄
-      view_A = matrix_VM.mul_vector(vA.position)
-      view_B = matrix_VM.mul_vector(vB.position)
-      view_C = matrix_VM.mul_vector(vC.position)
+      tangent_vector = Vector3(
+          matrix_VM.matrix[0][0]*tanx + matrix_VM.matrix[0][1]*tany + matrix_VM.matrix[0][2]*tanz,
+          matrix_VM.matrix[1][0]*tanx + matrix_VM.matrix[1][1]*tany + matrix_VM.matrix[1][2]*tanz,
+          matrix_VM.matrix[2][0]*tanx + matrix_VM.matrix[2][1]*tany + matrix_VM.matrix[2][2]*tanz,
+      ).normalize()
 
       #==== [클리핑] ====
       # 0.1보다 작으면 바로 눈앞이거나 뒤에 있음 = 꼭지점 중 하나라도 포함된다면 제거 대상
@@ -175,7 +213,8 @@ class Pipeline:
                 )
 
                 #뷰 공간에서의 빛 위치 조정
-                light_vector = self.light_pos.minus(interp_pos)
+                view_light = view_matrix.mul_vector(self.light_pos)
+                light_vector = view_light.minus(interp_pos)
                 light_distance = light_vector.magnitude()
                 attenuation =  1.0 / (1.0 / 0.1 * light_distance + 0.05 *(light_distance*light_distance))
                 light_dir = light_vector.normalize()
@@ -183,34 +222,24 @@ class Pipeline:
                 #카메라는 (0,0,0)에 있으므로 시선은 (0 - 보간 위치)
                 view_dir = Vector3().minus(interp_pos).normalize()
                 new_color = self.fragment_shader(
-                current_u, current_v, face_normal, tangent_vector,
-                attenuation, light_dir, view_dir, diffuse_map, normal_map, specular_map
+                current_u, current_v, face_normal, tangent_vector, interp_pos,
+                view_dir, diffuse_map, normal_map, specular_map
                 )
                 #추가: 불투명 물체만 z_버퍼 적용(26.06.06)
                 if not is_transparent:
                   self.z_buffer[y][x] = current_z
-
                   #프레임 버퍼에 값을 기록
                   self.frame_buffer[y][x] = new_color
 
                 else:
-                  new_color = self.fragment_shader(
-                  current_u, current_v, face_normal, tangent_vector,
-                  attenuation, light_dir, view_dir, diffuse_map, normal_map, specular_map
-                  )
-
-                #반투명 물체일 경우 색상 섞기
-                if is_transparent:
                   #배경색 가져오기
                   bg_color = self.frame_buffer[y][x]
-                  #블렌딩 공식: (새 색상 * 알파) + (배경색 * (1 - 알파))
-                  blended_r = int(new_color[0] * object_alpha + bg_color[0] * (1 - object_alpha))
-                  blended_g = int(new_color[1] * object_alpha + bg_color[1] * (1 - object_alpha))
-                  blended_b = int(new_color[2] * object_alpha + bg_color[2] * (1 - object_alpha))
-                  self.frame_buffer[y][x] = (blended_r, blended_g, blended_b)
-                else:
-                  self.frame_buffer[y][x] = new_color
-
+                  self.frame_buffer[y][x] = (
+                    #블렌딩 공식: (새 색상 * 알파) + (배경색 * (1 - 알파))
+                    int(new_color[0] * object_alpha + bg_color[0] * (1 - object_alpha)),
+                    int(new_color[1] * object_alpha + bg_color[1] * (1 - object_alpha)),
+                    int(new_color[2] * object_alpha + bg_color[2] * (1 - object_alpha)),
+                  )
 
   #프레임 버퍼의 데이터를 PIL 이미지로 변환
   def show(self):
@@ -231,17 +260,14 @@ class Pipeline:
       vA, vB, vC = triangle
 
       #스카이박스는 안에서 보기 때문에 백페이스 컬링을 반전(이미 자체적인 경우도 있음)
-      
+
       line1 = vB.position.minus(vA.position)
       line2 = vC.position.minus(vA.position)
       face_normal = line1.cross(line2).normalize()
-      
+
       #camera_ray = vA.position.minus(self.camera.eye).normalize()
       camera_ray = vA.position.normalize()
-      """
-      if face_normal.dot(camera_ray) <= 0: #안면이 아니면 연산 x
-        continue
-      """
+
       view_A = matrix_VM.mul_vector(vA.position)
       view_B = matrix_VM.mul_vector(vB.position)
       view_C = matrix_VM.mul_vector(vC.position)
@@ -261,36 +287,21 @@ class Pipeline:
       max_x = min(self.width - 1, max(pixel_A.x, pixel_B.x, pixel_C.x))
       min_y = max(0, min(pixel_A.y, pixel_B.y, pixel_C.y))
       max_y = min(self.height - 1, max(pixel_A.y, pixel_B.y, pixel_C.y))
-      """
+
       for y in range(min_y,max_y + 1):
         for x in range(min_x, max_x + 1):
           alpha, beta, gamma = get_bycentric(pixel_A, pixel_B, pixel_C, Vector2(x, y))
-          if alpha >= 0 and beta >= 0 and gamma >= 0:
-            # w의 역값(알파, 베타, 감마를 나누기)
-            inv_w = alpha * (1/ndc_A.w) + beta * (1/ndc_B.w) + gamma * (1/ndc_C.w)
-            
-            current_u = alpha * vA.uv.x + beta * vB.uv.x + gamma * vC.uv.x
-            current_v = alpha * vA.uv.y + beta * vB.uv.y + gamma * vC.uv.y
-            current_z = (alpha * ndc_A.z + beta * ndc_B.z + gamma * ndc_C.z)
-            
-            if self.z_buffer[y][x] > current_z:
-              self.z_buffer[y][x] = current_z
-              self.frame_buffer[y][x] = diffuse.get_color(current_u,current_v).to_tuple()
-      """
-      for y in range(min_y,max_y + 1):
-        for x in range(min_x, max_x + 1):
-          alpha, beta, gamma = get_bycentric(pixel_A, pixel_B, pixel_C, Vector2(x, y))
-          
+
           if alpha >= 0 and beta >= 0 and gamma >= 0:
             # 1. 뷰 공간의 Z값을 이용해 1/Z 보간 (w 대신 사용)
             # 0으로 나누는 것을 방지하기 위해 아주 작은 값을 더해주는 것도 좋습니다.
             inv_z = alpha * (1.0 / view_A.z) + beta * (1.0 / view_B.z) + gamma * (1.0 / view_C.z)
-            
+
             # 2. UV 좌표 원근 보정
             current_u = (alpha * (vA.uv.x / view_A.z) + beta * (vB.uv.x / view_B.z) + gamma * (vC.uv.x / view_C.z)) / inv_z
             current_v = (alpha * (vA.uv.y / view_A.z) + beta * (vB.uv.y / view_B.z) + gamma * (vC.uv.y / view_C.z)) / inv_z
-            
+
             # (선택 사항) 만약 Z-버퍼 처리가 필요하다면 보간된 깊이값을 복원하여 사용할 수 있습니다.
             # current_depth = 1.0 / inv_z
-            
+
             self.frame_buffer[y][x] = diffuse.get_color(current_u, current_v).to_tuple()
